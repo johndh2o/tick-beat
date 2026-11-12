@@ -101,15 +101,14 @@ final class BeatSyncPlayer
 		thread.start();
 	}
 
-	/** Stops the audio thread without waiting for it; it closes the sound line on its way out. */
+	/**
+	 * Stops the audio thread without waiting for it. The thread notices within one
+	 * chunk (~12 ms) and closes the sound line on its way out.
+	 */
 	void shutdown()
 	{
 		running = false;
-		if (thread != null)
-		{
-			thread.interrupt();
-			thread = null;
-		}
+		thread = null;
 		wake();
 	}
 
