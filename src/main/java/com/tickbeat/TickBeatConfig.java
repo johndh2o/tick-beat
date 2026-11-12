@@ -127,15 +127,4 @@ public interface TickBeatConfig extends Config
 	{
 		return true;
 	}
-
-	@ConfigItem(
-		keyName = "musicFolder",
-		name = "Music folder",
-		description = "Folder with your songs and playlist.txt. Leave blank for .runelite/tick-beat",
-		position = 9
-	)
-	default String musicFolder()
-	{
-		return "";
-	}
 }

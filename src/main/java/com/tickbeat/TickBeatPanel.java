@@ -89,7 +89,8 @@ class TickBeatPanel extends PluginPanel
 
 		JLabel hint = new JLabel("<html>Turn on the Game sound metronome and drag <b>Music offset</b> "
 			+ "until the beat and the tick sound land together. Positive values move the music later."
-			+ "<br><br>If a song has the tick on the upbeat, press <b>Flip beat</b> while it plays.</html>");
+			+ "<br><br>If a song has the tick on the upbeat, press <b>Flip beat</b> while it plays."
+			+ "<br><br>Songs go in <b>.runelite/plugin-data/tick-beat</b>.</html>");
 		hint.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
 		add(hint);
 

@@ -19,7 +19,7 @@ up or slowed down slightly to fit.
    `--developer-mode` to *Program arguments*.
 4. Log in. Open the plugin's settings (wrench icon → search "Tick Beat").
 
-On first run the plugin creates `~/.runelite/tick-beat/` with a
+On first run the plugin creates `~/.runelite/plugin-data/tick-beat/` with a
 `playlist.txt` template.
 
 ## Finding 100 BPM songs
@@ -38,7 +38,7 @@ On first run the plugin creates `~/.runelite/tick-beat/` with a
 
 ## Add songs automatically
 
-Put your songs (MP3, WAV, FLAC or OGG) in `~/.runelite/tick-beat/`, then run:
+Put your songs (MP3, WAV, FLAC or OGG) in `~/.runelite/plugin-data/tick-beat/`, then run:
 
 ```
 python -m pip install numpy soundfile
@@ -63,7 +63,7 @@ librosa/SciPy, so they aren't used.
 
 ## Add songs by hand
 
-1. Put `.wav` or `.aiff` files in `~/.runelite/tick-beat/`. MP3s need
+1. Put `.wav` or `.aiff` files in `~/.runelite/plugin-data/tick-beat/`. MP3s need
    converting first (e.g. `ffmpeg -i song.mp3 song.wav`, or export from your DAW).
 2. Add a line to `playlist.txt` for each song:
 

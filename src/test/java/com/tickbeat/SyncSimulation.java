@@ -10,6 +10,7 @@ import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
+import net.runelite.client.util.Filepath;
 
 /**
  * Offline check of the sync engine, no game or sound card needed.
@@ -53,7 +54,7 @@ public final class SyncSimulation
 		FakeOut out = new FakeOut();
 		TickClock ticks = new TickClock();
 		BeatSyncPlayer p = new BeatSyncPlayer(out, out::nowNs, ticks, System.out::println);
-		p.setPlaylist(Collections.singletonList(new Track(wav, bpm, firstBeatMs)), false);
+		p.setPlaylist(Collections.singletonList(new Track(asFilepath(wav), bpm, firstBeatMs)), false);
 		p.setPlaying(true);
 		p.setVolume(100);
 
@@ -92,7 +93,7 @@ public final class SyncSimulation
 				double phase = (tNs - tickOffsetNs) / TickClock.PERIOD_NS;
 				double e = (phase - Math.rint(phase)) * 600.0;
 				// For 50 BPM a click falls every other tick; for 200 BPM half the clicks are between ticks.
-				double bpt = new Track(wav, bpm, 0).beatsPerTick();
+				double bpt = new Track(asFilepath(wav), bpm, 0).beatsPerTick();
 				if (bpt > 1)
 				{
 					double sub = (tNs - tickOffsetNs) / (TickClock.PERIOD_NS / bpt);
@@ -160,6 +161,11 @@ public final class SyncSimulation
 		boolean pass = n > 35 && worst < 3;
 		System.out.printf("metronome only (no songs)                        -> %d clicks, worst %.1f ms  %s%n", n, worst, pass ? "OK" : "FAIL");
 		return pass;
+	}
+
+	static Filepath asFilepath(File f)
+	{
+		return Filepath.Unchecked.getRooted(f.getParentFile().toPath()).joinSegment(f.getName());
 	}
 
 	static File clickTrack(double bpm, double firstBeatMs, int seconds) throws Exception

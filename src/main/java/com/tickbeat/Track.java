@@ -1,25 +1,30 @@
 package com.tickbeat;
 
-import java.io.File;
+import net.runelite.client.util.Filepath;
 
-/** One playlist entry: an audio file, its tempo, and where its first downbeat is. */
+/** One playlist entry: an audio file, its tempo, and where a beat falls in it. */
 final class Track
 {
-	final File file;
+	final Filepath file;
 	final double bpm;
 	/** Where a beat falls in the file. Changed by the "Flip beat" button. */
 	volatile double firstBeatMs;
 
-	Track(File file, double bpm, double firstBeatMs)
+	Track(Filepath file, double bpm, double firstBeatMs)
 	{
 		this.file = file;
 		this.bpm = bpm;
 		this.firstBeatMs = firstBeatMs;
 	}
 
+	String fileName()
+	{
+		return file.getFileName();
+	}
+
 	String name()
 	{
-		String n = file.getName();
+		String n = fileName();
 		int dot = n.lastIndexOf('.');
 		return dot > 0 ? n.substring(0, dot) : n;
 	}
@@ -46,13 +51,13 @@ final class Track
 		return best;
 	}
 
-	/** Speed the song has to play at so its beats land exactly on ticks (1.0 = untouched). */
 	/** Length of one game tick in this song's own time, in ms (600 ms at exactly 100 BPM). */
 	double tickLengthMs()
 	{
 		return beatsPerTick() * 60000.0 / bpm;
 	}
 
+	/** Speed the song has to play at so its beats land exactly on ticks (1.0 = untouched). */
 	double requiredSpeed()
 	{
 		return 100.0 * beatsPerTick() / bpm;

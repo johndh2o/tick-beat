@@ -1,22 +1,24 @@
 package com.tickbeat;
 
-import java.io.File;
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import net.runelite.client.util.Filepath;
 
 /**
- * Reads the music folder.
+ * Reads the music folder (.runelite/plugin-data/tick-beat).
  *
  * playlist.txt, one song per line:
- *     file name | BPM | first downbeat in ms
+ *     file name | BPM | first beat in ms
  * e.g.
  *     my song.wav | 100 | 412
  *
@@ -29,12 +31,12 @@ final class PlaylistLoader
 
 	private static final String TEMPLATE =
 		"# Tick Beat playlist\n"
-			+ "# One song per line:   file name | BPM | first downbeat (ms)\n"
+			+ "# One song per line:   file name | BPM | first beat (ms)\n"
 			+ "#\n"
 			+ "# BPM: 100 locks one beat to every tick. 50 and 200 also work.\n"
 			+ "#      Songs a few BPM off (98, 102...) are sped up or slowed down to fit.\n"
-			+ "# First downbeat: how far into the file the first beat hits, in milliseconds.\n"
-			+ "#      Find it in your DAW or audio editor. Get this right or the song will be in sync but off the beat.\n"
+			+ "# First beat: how far into the file a beat hits, in milliseconds.\n"
+			+ "#      Get this right or the song will be in sync but off the beat.\n"
 			+ "#\n"
 			+ "# Files: .wav or .aiff (convert MP3s first).\n"
 			+ "#\n"
@@ -45,19 +47,27 @@ final class PlaylistLoader
 	{
 	}
 
-	/** Writes a song's BPM and beat position into playlist.txt (updates its line, or adds one). */
-	static void save(File folder, Track track) throws IOException
+	private static List<String> readLines(Filepath file) throws IOException
 	{
-		File listFile = new File(folder, PLAYLIST);
+		try (BufferedReader r = file.openBufferedReader())
+		{
+			return r.lines().collect(Collectors.toList());
+		}
+	}
+
+	/** Writes a song's BPM and beat position into playlist.txt (updates its line, or adds one). */
+	static void save(Filepath folder, Track track) throws IOException
+	{
+		Filepath listFile = folder.joinSegment(PLAYLIST);
 		List<String> lines = listFile.exists()
-			? new ArrayList<>(Files.readAllLines(listFile.toPath(), StandardCharsets.UTF_8))
+			? new ArrayList<>(readLines(listFile))
 			: new ArrayList<>(Arrays.asList(TEMPLATE.split("\n")));
-		String newLine = String.format(Locale.ROOT, "%s | %.3f | %.0f", track.file.getName(), track.bpm, track.firstBeatMs);
+		String newLine = String.format(Locale.ROOT, "%s | %.3f | %.0f", track.fileName(), track.bpm, track.firstBeatMs);
 		boolean found = false;
 		for (int i = 0; i < lines.size(); i++)
 		{
 			String l = lines.get(i).trim();
-			if (!l.startsWith("#") && l.contains("|") && l.split("\\|")[0].trim().equals(track.file.getName()))
+			if (!l.startsWith("#") && l.contains("|") && l.split("\\|")[0].trim().equals(track.fileName()))
 			{
 				lines.set(i, newLine);
 				found = true;
@@ -68,32 +78,33 @@ final class PlaylistLoader
 		{
 			lines.add(newLine);
 		}
-		Files.write(listFile.toPath(), lines, StandardCharsets.UTF_8);
+		listFile.write(String.join("\n", lines) + "\n");
 	}
 
-	static List<Track> load(File folder, Consumer<String> messages)
+	static List<Track> load(Filepath folder, Consumer<String> messages)
 	{
 		List<Track> tracks = new ArrayList<>();
-		if (!folder.isDirectory())
+		try
 		{
-			if (!folder.mkdirs())
-			{
-				messages.accept("Tick Beat: couldn't create music folder " + folder);
-				return tracks;
-			}
+			folder.createDirectories();
+		}
+		catch (IOException e)
+		{
+			messages.accept("Tick Beat: couldn't create music folder " + folder);
+			return tracks;
 		}
 
-		File listFile = new File(folder, PLAYLIST);
+		Filepath listFile = folder.joinSegment(PLAYLIST);
 		Set<String> listed = new HashSet<>();
 		if (!listFile.exists())
 		{
 			try
 			{
-				Files.write(listFile.toPath(), TEMPLATE.getBytes(StandardCharsets.UTF_8));
+				listFile.write(TEMPLATE);
 			}
 			catch (IOException e)
 			{
-				messages.accept("Tick Beat: couldn't write " + listFile);
+				messages.accept("Tick Beat: couldn't write " + PLAYLIST);
 			}
 		}
 		else
@@ -101,7 +112,7 @@ final class PlaylistLoader
 			try
 			{
 				int lineNo = 0;
-				for (String line : Files.readAllLines(listFile.toPath(), StandardCharsets.UTF_8))
+				for (String line : readLines(listFile))
 				{
 					lineNo++;
 					line = line.trim();
@@ -121,10 +132,20 @@ final class PlaylistLoader
 						continue;
 					}
 					String[] parts = line.split("\\|");
-					File f = new File(folder, parts[0].trim());
+					String name = parts[0].trim();
+					Filepath f;
+					try
+					{
+						f = folder.joinSegment(name);
+					}
+					catch (IllegalArgumentException e)
+					{
+						messages.accept("Tick Beat: playlist line " + lineNo + ": invalid file name " + name);
+						continue;
+					}
 					if (!f.isFile())
 					{
-						messages.accept("Tick Beat: playlist line " + lineNo + ": can't find " + f.getName());
+						messages.accept("Tick Beat: playlist line " + lineNo + ": can't find " + name);
 						continue;
 					}
 					try
@@ -136,7 +157,7 @@ final class PlaylistLoader
 							throw new NumberFormatException();
 						}
 						tracks.add(new Track(f, bpm, first));
-						listed.add(f.getName());
+						listed.add(name);
 					}
 					catch (NumberFormatException e)
 					{
@@ -146,24 +167,29 @@ final class PlaylistLoader
 			}
 			catch (IOException e)
 			{
-				messages.accept("Tick Beat: couldn't read " + listFile);
+				messages.accept("Tick Beat: couldn't read " + PLAYLIST);
 			}
 		}
 
 		// Files not mentioned in playlist.txt are only added automatically while the
 		// playlist is still empty; once you (or the analyzer) list songs, the list rules.
-		File[] files = listed.isEmpty() ? folder.listFiles() : null;
-		if (files != null)
+		if (listed.isEmpty())
 		{
-			Arrays.sort(files);
-			for (File f : files)
+			try (Stream<Filepath> files = folder.walk(1))
 			{
-				String n = f.getName().toLowerCase(Locale.ROOT);
-				boolean audio = n.endsWith(".wav") || n.endsWith(".aif") || n.endsWith(".aiff");
-				if (f.isFile() && audio && !listed.contains(f.getName()))
-				{
-					tracks.add(new Track(f, 100, 0));
-				}
+				files
+					.filter(Filepath::isFile)
+					.filter(f ->
+					{
+						String n = f.getFileName().toLowerCase(Locale.ROOT);
+						return n.endsWith(".wav") || n.endsWith(".aif") || n.endsWith(".aiff");
+					})
+					.sorted(Comparator.comparing(Filepath::getFileName))
+					.forEach(f -> tracks.add(new Track(f, 100, 0)));
+			}
+			catch (IOException e)
+			{
+				messages.accept("Tick Beat: couldn't list the music folder");
 			}
 		}
 		return tracks;

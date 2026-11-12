@@ -283,7 +283,10 @@ def read_playlist(path):
 
 
 def main():
-    default = Path.home() / ".runelite" / "tick-beat"
+    # The plugin's folder; older test builds used .runelite/tick-beat.
+    default = Path.home() / ".runelite" / "plugin-data" / "tick-beat"
+    if not default.is_dir() and (Path.home() / ".runelite" / "tick-beat").is_dir():
+        default = Path.home() / ".runelite" / "tick-beat"
     ap = argparse.ArgumentParser(description="Analyze songs for Tick Beat")
     ap.add_argument("folder", nargs="?", default=str(default))
     ap.add_argument("--redo", action="store_true", help="re-analyze songs already in playlist.txt")

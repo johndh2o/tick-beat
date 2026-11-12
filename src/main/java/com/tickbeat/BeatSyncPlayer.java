@@ -1,17 +1,19 @@
 package com.tickbeat;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.InputStream;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
+import net.runelite.client.util.Filepath;
 
 /**
  * Plays a playlist with every beat locked to the game tick.
@@ -99,39 +101,117 @@ final class BeatSyncPlayer
 		thread.start();
 	}
 
+	/** Stops the audio thread without waiting for it; it closes the sound line on its way out. */
 	void shutdown()
 	{
 		running = false;
 		if (thread != null)
 		{
 			thread.interrupt();
-			try
-			{
-				thread.join(1000);
-			}
-			catch (InterruptedException ignored)
-			{
-				Thread.currentThread().interrupt();
-			}
 			thread = null;
 		}
-		out.close();
+		wake();
 	}
 
+	/** Use an explicit list of songs (tests). The plugin uses {@link #reload} instead. */
 	void setPlaylist(List<Track> tracks, boolean shuffle)
 	{
 		pendingShuffle = shuffle;
 		pendingPlaylist = new ArrayList<>(tracks);
+		wake();
+	}
+
+	/**
+	 * Re-read the music folder. The folder lookup and all file reading happen on
+	 * the audio thread, never on the game's client thread.
+	 */
+	void reload(Callable<Filepath> folderSource, boolean shuffle)
+	{
+		this.folderSource = folderSource;
+		pendingShuffle = shuffle;
+		reloadRequested = true;
+		wake();
+	}
+
+	/** Save a track's beat position to playlist.txt (done on the audio thread). */
+	void save(Track t)
+	{
+		saveRequested = t;
+		wake();
 	}
 
 	void setPlaying(boolean p)
 	{
 		playing = p;
+		wake();
 	}
 
 	void next()
 	{
 		skipRequested = true;
+		wake();
+	}
+
+	// File work requested from other threads, done on the audio thread.
+	private volatile Callable<Filepath> folderSource;
+	private Filepath folder;
+	private volatile boolean reloadRequested;
+	private volatile Track saveRequested;
+
+	private final Object idleLock = new Object();
+
+	private void wake()
+	{
+		synchronized (idleLock)
+		{
+			idleLock.notifyAll();
+		}
+	}
+
+	/** Waits until something changes (or a short timeout) while there's nothing to play. */
+	private void idle(long maxMs) throws InterruptedException
+	{
+		synchronized (idleLock)
+		{
+			idleLock.wait(maxMs);
+		}
+	}
+
+	private void doFileWork()
+	{
+		Callable<Filepath> src = folderSource;
+		if (reloadRequested && src != null)
+		{
+			reloadRequested = false;
+			try
+			{
+				folder = src.call();
+				List<Track> tracks = PlaylistLoader.load(folder, messages);
+				if (tracks.isEmpty())
+				{
+					messages.accept("Tick Beat: no songs yet. Put .wav files in " + folder
+						+ " and list them in " + PlaylistLoader.PLAYLIST + ".");
+				}
+				setPlaylist(tracks, pendingShuffle);
+			}
+			catch (Exception e)
+			{
+				messages.accept("Tick Beat: couldn't open the music folder (" + e.getMessage() + ")");
+			}
+		}
+		Track t = saveRequested;
+		if (t != null && folder != null)
+		{
+			saveRequested = null;
+			try
+			{
+				PlaylistLoader.save(folder, t);
+			}
+			catch (Exception e)
+			{
+				messages.accept("Tick Beat: couldn't save the new beat position to " + PlaylistLoader.PLAYLIST);
+			}
+		}
 	}
 
 	void setVolume(int percent)
@@ -189,32 +269,40 @@ final class BeatSyncPlayer
 
 	private void loop()
 	{
-		while (running)
+		try
 		{
-			try
+			while (running)
 			{
-				if (!playing)
+				try
 				{
-					if (song != null)
+					doFileWork();
+					if (!playing)
 					{
-						unload();
-						out.close();
-						openRate = -1;
+						if (openRate >= 0)
+						{
+							unload();
+							out.close();
+							openRate = -1;
+						}
+						idle(250);
+						continue;
 					}
-					Thread.sleep(25);
-					continue;
+					step();
 				}
-				step();
+				catch (InterruptedException e)
+				{
+					return;
+				}
+				catch (Exception e)
+				{
+					messages.accept("Tick Beat audio error: " + e.getMessage());
+					playing = false;
+				}
 			}
-			catch (InterruptedException e)
-			{
-				return;
-			}
-			catch (Exception e)
-			{
-				messages.accept("Tick Beat audio error: " + e.getMessage());
-				playing = false;
-			}
+		}
+		finally
+		{
+			out.close();
 		}
 	}
 
@@ -260,7 +348,7 @@ final class BeatSyncPlayer
 			}
 			if (openRate < 0)
 			{
-				Thread.sleep(100);
+				idle(250);
 				return;
 			}
 			writeSilence();
@@ -353,7 +441,7 @@ final class BeatSyncPlayer
 			}
 			catch (Exception e)
 			{
-				messages.accept("Tick Beat: couldn't play " + t.file.getName() + " (" + e.getMessage() + ")");
+				messages.accept("Tick Beat: couldn't play " + t.fileName() + " (" + e.getMessage() + ")");
 			}
 		}
 		return false;
@@ -525,9 +613,10 @@ final class BeatSyncPlayer
 			this.frames = pcm.length / channels;
 		}
 
-		static Decoded load(File file) throws Exception
+		static Decoded load(Filepath file) throws Exception
 		{
-			try (AudioInputStream raw = AudioSystem.getAudioInputStream(file))
+			try (InputStream fileIn = new BufferedInputStream(file.openInputStream());
+				AudioInputStream raw = AudioSystem.getAudioInputStream(fileIn))
 			{
 				AudioFormat src = raw.getFormat();
 				int ch = src.getChannels();

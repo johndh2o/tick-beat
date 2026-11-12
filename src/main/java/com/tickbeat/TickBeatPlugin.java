@@ -6,7 +6,6 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import javax.inject.Inject;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -15,7 +14,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
-import net.runelite.client.RuneLite;
+import net.runelite.api.SoundEffectID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -32,7 +31,10 @@ import net.runelite.client.util.HotkeyListener;
 @PluginDescriptor(
 	name = "Tick Beat",
 	description = "Plays your own 100 BPM playlist with every beat locked to the game tick",
-	tags = {"music", "metronome", "tick", "bpm", "rhythm", "playlist"}
+	tags = {"music", "metronome", "tick", "bpm", "rhythm", "playlist"},
+	internalName = "tick-beat",
+	// Earlier test builds kept songs in .runelite/tick-beat; RuneLite moves that folder over automatically.
+	legacyDataDirectory = "tick-beat"
 )
 public class TickBeatPlugin extends Plugin
 {
@@ -61,7 +63,7 @@ public class TickBeatPlugin extends Plugin
 	private ClientToolbar clientToolbar;
 
 	/** The game's tick sound effect, the same one RuneLite's Metronome plugin plays. */
-	private static final int GAME_TICK_SOUND = 3929; // SoundEffectID.GE_INCREMENT_PLOP
+	private static final int GAME_TICK_SOUND = SoundEffectID.GE_INCREMENT_PLOP;
 
 	private TickBeatPanel panel;
 	private NavigationButton navButton;
@@ -178,14 +180,7 @@ public class TickBeatPlugin extends Plugin
 		double len = t.tickLengthMs();
 		t.firstBeatMs = (t.firstBeatMs + len / 2) % len;
 		player.beatPositionChanged();
-		try
-		{
-			PlaylistLoader.save(musicFolder(), t);
-		}
-		catch (java.io.IOException e)
-		{
-			message("Tick Beat: couldn't save the new beat position to playlist.txt");
-		}
+		player.save(t);
 	}
 
 	void nextSong()
@@ -239,7 +234,7 @@ public class TickBeatPlugin extends Plugin
 			panel.refreshFromConfig();
 		}
 		String key = event.getKey();
-		if ("musicFolder".equals(key) || "shuffle".equals(key))
+		if ("shuffle".equals(key))
 		{
 			reloadPlaylist();
 		}
@@ -265,22 +260,11 @@ public class TickBeatPlugin extends Plugin
 		player.setClickVolume(config.metronomeSound() == MetronomeSound.SYNCED_CLICK ? config.metronomeVolume() : 0);
 	}
 
+	/** The music folder is the plugin's own data folder: .runelite/plugin-data/tick-beat. */
 	private void reloadPlaylist()
 	{
-		File folder = musicFolder();
-		java.util.List<Track> tracks = PlaylistLoader.load(folder, this::message);
-		if (tracks.isEmpty())
-		{
-			message("Tick Beat: no songs yet. Put .wav files in " + folder.getAbsolutePath()
-				+ " and set their BPM in " + PlaylistLoader.PLAYLIST + ".");
-		}
-		player.setPlaylist(tracks, config.shuffle());
-	}
-
-	private File musicFolder()
-	{
-		String custom = config.musicFolder().trim();
-		return custom.isEmpty() ? new File(RuneLite.RUNELITE_DIR, "tick-beat") : new File(custom);
+		// getPluginDirectory touches the disk, so the player calls it on its own thread.
+		player.reload(this::getPluginDirectory, config.shuffle());
 	}
 
 	/** A small music-note icon for the sidebar, drawn in code so no image file is needed. */
@@ -304,7 +288,7 @@ public class TickBeatPlugin extends Plugin
 	/** Shows a message in the game chat (or the log if not logged in). Safe from any thread. */
 	private void message(String text)
 	{
-		log.info(text);
+		log.debug(text);
 		clientThread.invokeLater(() ->
 		{
 			if (client.getGameState() == net.runelite.api.GameState.LOGGED_IN)
